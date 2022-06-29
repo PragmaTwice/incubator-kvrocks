@@ -109,7 +109,7 @@ jobs:
         with:
           path: |
             ~/.ccache
-          key: ${{ toJson(matrix) }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/**') }}-ccache
+          key: ${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/**') }}-ccache
 
       - name: Config ccache
         run: |
