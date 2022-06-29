@@ -116,7 +116,7 @@ jobs:
           key: ${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/**') }}-ccache
 
       - name: Config ccache
-        run: |
+        run: | 
           echo "CCACHE_MAXSIZE=512M" >> $GITHUB_ENV
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
           echo "CCACHE_COMPILERCHECK=%compiler% --version" >> $GITHUB_ENV
