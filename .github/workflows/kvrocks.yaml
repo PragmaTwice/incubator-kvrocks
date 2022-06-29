@@ -129,7 +129,7 @@ jobs:
         run: |
           which ccache
           ccache -p
-          ccache -s
+          ccache -s -v
 
       - name: Run Unit Test
         run: ./build/unittest
