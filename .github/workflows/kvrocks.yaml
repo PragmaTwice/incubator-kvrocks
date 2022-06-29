@@ -80,18 +80,6 @@ jobs:
             ~/local/bin/redis-cli
           key: ${{ runner.os }}-redis-cli
 
-      - name: Cache ccache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.ccache
-          key: ${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/**') }}-ccache
-
-      - name: Config ccache
-        run: |
-          echo "CCACHE_MAXSIZE=512M" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-
       - name: Setup macOS
         if: ${{ startsWith(matrix.os, 'macos') }}
         run: |
@@ -115,6 +103,18 @@ jobs:
 
       - name: Checkout Code Base
         uses: actions/checkout@v3
+
+      - name: Cache ccache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.ccache
+          key: ${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/**') }}-ccache
+
+      - name: Config ccache
+        run: |
+          echo "CCACHE_MAXSIZE=512M" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
       - name: Build Kvrocks
         run: |
