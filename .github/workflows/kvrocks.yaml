@@ -124,6 +124,12 @@ jobs:
         run: |
           ./build.sh build -j$NPROC --unittest \
           ${{ matrix.clang }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        
+      - name: Ccache stat
+        run: |
+          which ccache
+          ccache -p
+          ccache -s
 
       - name: Run Unit Test
         run: ./build/unittest
