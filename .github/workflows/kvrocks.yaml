@@ -119,7 +119,7 @@ jobs:
         run: |
           echo "CCACHE_MAXSIZE=512M" >> $GITHUB_ENV
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
+          echo "CCACHE_COMPILERCHECK=%compiler% --version" >> $GITHUB_ENV
 
       - name: Build Kvrocks
         run: |
