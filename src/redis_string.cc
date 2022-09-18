@@ -42,7 +42,7 @@ std::vector<rocksdb::Status> String::getRawValues(
   for (size_t i = 0; i < keys.size(); i++) {
     if (!statuses[i].ok()) continue;
     (*raw_values)[i].assign(pin_values[i].data(), pin_values[i].size());
-    Metadata metadata(kRedisNone, false);
+    NoneMetadata metadata(false);
     metadata.Decode((*raw_values)[i]);
     if (metadata.Expired()) {
       (*raw_values)[i].clear();
@@ -67,7 +67,7 @@ rocksdb::Status String::getRawValue(const std::string &ns_key, std::string *raw_
   rocksdb::Status s = db_->Get(read_options, metadata_cf_handle_, ns_key, raw_value);
   if (!s.ok()) return s;
 
-  Metadata metadata(kRedisNone, false);
+  NoneMetadata metadata(false);
   metadata.Decode(*raw_value);
   if (metadata.Expired()) {
     raw_value->clear();
@@ -116,7 +116,7 @@ rocksdb::Status String::Append(const std::string &user_key, const std::string &v
   rocksdb::Status s = getRawValue(ns_key, &raw_value);
   if (!s.ok() && !s.IsNotFound()) return s;
   if (s.IsNotFound()) {
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     metadata.Encode(&raw_value);
   }
   raw_value.append(value);
@@ -158,7 +158,7 @@ rocksdb::Status String::GetSet(const std::string &user_key, const std::string &n
   if (!s.ok() && !s.IsNotFound()) return s;
 
   std::string raw_value;
-  Metadata metadata(kRedisString, false);
+  StringMetadata metadata(false);
   metadata.Encode(&raw_value);
   raw_value.append(new_value);
   auto write_status = updateRawValue(ns_key, raw_value);
@@ -213,7 +213,7 @@ rocksdb::Status String::SetXX(const std::string &user_key, const std::string &va
 
   *ret = 1;
   std::string raw_value;
-  Metadata metadata(kRedisString, false);
+  StringMetadata metadata(false);
   metadata.expire = expire;
   metadata.Encode(&raw_value);
   raw_value.append(value);
@@ -237,7 +237,7 @@ rocksdb::Status String::SetRange(const std::string &user_key, int offset, const 
       *ret = 0;
       return rocksdb::Status::OK();
     }
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     metadata.Encode(&raw_value);
   }
   size = static_cast<int>(raw_value.size());
@@ -268,7 +268,7 @@ rocksdb::Status String::IncrBy(const std::string &user_key, int64_t increment, i
   rocksdb::Status s = getRawValue(ns_key, &raw_value);
   if (!s.ok() && !s.IsNotFound()) return s;
   if (s.IsNotFound()) {
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     metadata.Encode(&raw_value);
   }
 
@@ -306,7 +306,7 @@ rocksdb::Status String::IncrByFloat(const std::string &user_key, double incremen
   if (!s.ok() && !s.IsNotFound()) return s;
 
   if (s.IsNotFound()) {
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     metadata.Encode(&raw_value);
   }
   value = raw_value.substr(STRING_HDR_SIZE, raw_value.size()-STRING_HDR_SIZE);
@@ -347,7 +347,7 @@ rocksdb::Status String::MSet(const std::vector<StringPair> &pairs, int ttl) {
   std::string ns_key;
   for (const auto &pair : pairs) {
     std::string bytes;
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     metadata.expire = expire;
     metadata.Encode(&bytes);
     bytes.append(pair.value.data(), pair.value.size());
@@ -390,7 +390,7 @@ rocksdb::Status String::MSetNX(const std::vector<StringPair> &pairs, int ttl, in
       return rocksdb::Status::OK();
     }
     std::string bytes;
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     metadata.expire = expire;
     metadata.Encode(&bytes);
     bytes.append(pair.value.data(), pair.value.size());
@@ -432,7 +432,7 @@ rocksdb::Status String::CAS(const std::string &user_key, const std::string &old_
   if (old_value == current_value) {
     std::string raw_value;
     uint32_t expire = 0;
-    Metadata metadata(kRedisString, false);
+    StringMetadata metadata(false);
     if (ttl > 0) {
       int64_t now;
       rocksdb::Env::Default()->GetCurrentTime(&now);

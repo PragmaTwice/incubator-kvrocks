@@ -182,21 +182,34 @@ rocksdb::Status Metadata::Decode(const std::string &bytes) {
   Slice input(bytes);
   GetFixed8(&input, &flags);
   GetFixed32(&input, reinterpret_cast<uint32_t *>(&expire));
-  if (Type() != kRedisString) {
-    if (input.size() < 12) rocksdb::Status::InvalidArgument(kErrMetadataTooShort);
-    GetFixed64(&input, &version);
-    GetFixed32(&input, &size);
+
+  if (input.size() < 12) rocksdb::Status::InvalidArgument(kErrMetadataTooShort);
+  GetFixed64(&input, &version);
+  GetFixed32(&input, &size);
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status StringMetadata::Decode(const std::string &bytes) {
+  // flags(1byte) + expire (4byte)
+  if (bytes.size() < 5) {
+    return rocksdb::Status::InvalidArgument(kErrMetadataTooShort);
   }
+  Slice input(bytes);
+  GetFixed8(&input, &flags);
+  GetFixed32(&input, reinterpret_cast<uint32_t *>(&expire));
   return rocksdb::Status::OK();
 }
 
 void Metadata::Encode(std::string *dst) {
   PutFixed8(dst, flags);
   PutFixed32(dst, (uint32_t) expire);
-  if (Type() != kRedisString) {
-    PutFixed64(dst, version);
-    PutFixed32(dst, size);
-  }
+  PutFixed64(dst, version);
+  PutFixed32(dst, size);
+}
+
+void StringMetadata::Encode(std::string *dst) {
+  PutFixed8(dst, flags);
+  PutFixed32(dst, (uint32_t) expire);
 }
 
 void Metadata::InitVersionCounter() {
@@ -351,4 +364,29 @@ rocksdb::Status StreamMetadata::Decode(const std::string &bytes) {
   GetFixed64(&input, &entries_added);
 
   return rocksdb::Status::OK();
+}
+
+std::unique_ptr<Metadata> CreateMetadata(RedisType type, bool generate_version) {
+  switch(type) {
+  case kRedisNone:
+    return std::unique_ptr<Metadata>(new NoneMetadata(generate_version));
+  case kRedisString:
+    return std::unique_ptr<Metadata>(new StringMetadata(generate_version));
+  case kRedisHash:
+    return std::unique_ptr<Metadata>(new HashMetadata(generate_version));
+  case kRedisList:
+    return std::unique_ptr<Metadata>(new ListMetadata(generate_version));
+  case kRedisSet:
+    return std::unique_ptr<Metadata>(new SetMetadata(generate_version));
+  case kRedisZSet:
+    return std::unique_ptr<Metadata>(new ZSetMetadata(generate_version));
+  case kRedisBitmap:
+    return std::unique_ptr<Metadata>(new BitmapMetadata(generate_version));
+  case kRedisSortedint:
+    return std::unique_ptr<Metadata>(new SortedintMetadata(generate_version));
+  case kRedisStream:
+    return std::unique_ptr<Metadata>(new StreamMetadata(generate_version));
+  }
+
+  return nullptr;
 }

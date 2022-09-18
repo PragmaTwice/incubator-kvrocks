@@ -108,8 +108,10 @@ class Metadata {
   uint64_t version;
   uint32_t size;
 
- public:
+ protected:
   explicit Metadata(RedisType type, bool generate_version = true);
+
+ public:
   static void InitVersionCounter();
 
   RedisType Type() const;
@@ -122,6 +124,22 @@ class Metadata {
 
  private:
   uint64_t generateVersion();
+};
+
+// factory pattern for Metadata
+std::unique_ptr<Metadata> CreateMetadata(RedisType type, bool generate_version = true);
+
+class NoneMetadata : public Metadata {
+ public:
+  explicit NoneMetadata(bool generate_version = true) : Metadata(kRedisNone, generate_version){}
+};
+
+class StringMetadata : public Metadata {
+ public:
+  explicit StringMetadata(bool generate_version = true) : Metadata(kRedisString, generate_version){}
+
+  void Encode(std::string *dst) override;
+  rocksdb::Status Decode(const std::string &bytes) override;
 };
 
 class HashMetadata : public Metadata {

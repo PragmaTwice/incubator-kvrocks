@@ -54,7 +54,7 @@ rocksdb::Status WriteBatchExtractor::PutCF(uint32_t column_family_id, const Slic
     if (slot_ >= 0) {
       if (static_cast<uint16_t>(slot_) != GetSlotNumFromKey(user_key)) return rocksdb::Status::OK();
     }
-    Metadata metadata(kRedisNone);
+    NoneMetadata metadata;
     metadata.Decode(value.ToString());
     if (metadata.Type() == kRedisString) {
       command_args = {"SET", user_key, value.ToString().substr(5, value.size() - 5)};

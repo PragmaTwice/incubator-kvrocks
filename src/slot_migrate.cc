@@ -561,7 +561,7 @@ Status SlotMigrate::MigrateOneKey(rocksdb::Slice key, std::string *restore_cmds)
   std::string bytes;
   bool st = GetSlotKeyMetadata(prefix_key, &bytes);
   if (!st) return Status(Status::NotOK, "[migrate] Failed to get key's metadata");
-  Metadata metadata(kRedisNone, false);
+  NoneMetadata metadata(false);
   metadata.Decode(bytes);
   if (metadata.Type() != kRedisString && metadata.size == 0) {
     LOG(INFO) << "[migrate] No elements of key: " << prefix_key;
