@@ -167,7 +167,7 @@ def clang_tidy(dir: str, jobs: int, clang_tidy_path: str, run_clang_tidy_path: s
     check_version(version_str, CLANG_TIDY_REQUIRED_VERSION, "clang-tidy")
 
     if not (Path(dir) / 'compile_commands.json').exists():
-        raise RuntimeError("expect compile_commands.json in build directory {}".format(dir))
+        raise RuntimeError(f"expect compile_commands.json in build directory {dir}")
 
     basedir = Path(__file__).parent.absolute()
 
