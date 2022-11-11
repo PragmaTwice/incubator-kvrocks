@@ -156,8 +156,8 @@ void Worker::newTCPConnection(evconnlistener *listener, evutil_socket_t fd, sock
   bufferevent_enable(bev, EV_READ);
   Status status = worker->AddConnection(conn);
   if (!status.IsOK()) {
-    std::string err_msg = Redis::Error("ERR " + status.Msg());
-    Util::SockSend(fd, err_msg);
+    auto err_msg = Redis::Error("ERR " + status.Msg());
+    Util::SockSend(fd, err_msg.String());
     conn->Close();
     return;
   }
@@ -184,8 +184,8 @@ void Worker::newUnixSocketConnection(evconnlistener *listener, evutil_socket_t f
   bufferevent_enable(bev, EV_READ);
   Status status = worker->AddConnection(conn);
   if (!status.IsOK()) {
-    std::string err_msg = Redis::Error("ERR " + status.Msg());
-    Util::SockSend(fd, err_msg);
+    auto err_msg = Redis::Error("ERR " + status.Msg());
+    Util::SockSend(fd, err_msg.String());
     conn->Close();
     return;
   }
@@ -408,7 +408,7 @@ void Worker::FeedMonitorConns(Redis::Connection *conn, const std::vector<std::st
   for (const auto &iter : monitor_conns_) {
     if (conn == iter.second) continue;  // skip the monitor command
     if (conn->GetNamespace() == iter.second->GetNamespace() || iter.second->GetNamespace() == kDefaultNamespace) {
-      iter.second->Reply(Redis::SimpleString(output));
+      iter.second->Reply(Redis::SimpleString(output).String());
     }
   }
 }
@@ -458,7 +458,7 @@ void Worker::KickoutIdleClients(int timeout) {
     while (iterations--) {
       if (iter == conns_.end()) iter = conns_.begin();
       if (static_cast<int>(iter->second->GetIdleTime()) >= timeout) {
-        to_be_killed_conns.emplace_back(std::make_pair(iter->first, iter->second->GetID()));
+        to_be_killed_conns.emplace_back(iter->first, iter->second->GetID());
       }
       iter++;
     }

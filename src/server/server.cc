@@ -33,6 +33,7 @@
 #include "config.h"
 #include "redis_connection.h"
 #include "redis_request.h"
+#include "server/redis_reply.h"
 #include "storage/compaction_checker.h"
 #include "storage/redis_db.h"
 #include "storage/scripting.h"
@@ -334,13 +335,13 @@ int Server::PublishMessage(const std::string &channel, const std::string &msg) {
   }
   pubsub_channels_mu_.unlock();
 
-  std::string channel_reply;
-  channel_reply.append(Redis::MultiLen(3));
-  channel_reply.append(Redis::BulkString("message"));
-  channel_reply.append(Redis::BulkString(channel));
-  channel_reply.append(Redis::BulkString(msg));
+  auto channel_reply = Redis::Array({
+      Redis::BulkString("message"),
+      Redis::BulkString(channel),
+      Redis::BulkString(msg),
+  });
   for (const auto &conn_ctx : to_publish_conn_ctxs) {
-    auto s = conn_ctx.owner->Reply(conn_ctx.fd, channel_reply);
+    auto s = conn_ctx.owner->Reply(conn_ctx.fd, channel_reply.String());
     if (s.IsOK()) {
       cnt++;
     }
@@ -348,13 +349,13 @@ int Server::PublishMessage(const std::string &channel, const std::string &msg) {
 
   // We should publish corresponding pattern and message for connections
   for (const auto &conn_ctx : to_publish_patterns_conn_ctxs) {
-    std::string pattern_reply;
-    pattern_reply.append(Redis::MultiLen(4));
-    pattern_reply.append(Redis::BulkString("pmessage"));
-    pattern_reply.append(Redis::BulkString(patterns[index++]));
-    pattern_reply.append(Redis::BulkString(channel));
-    pattern_reply.append(Redis::BulkString(msg));
-    auto s = conn_ctx.owner->Reply(conn_ctx.fd, pattern_reply);
+    auto pattern_reply = Redis::Array({
+        Redis::BulkString("pmessage"),
+        Redis::BulkString(patterns[index++]),
+        Redis::BulkString(channel),
+        Redis::BulkString(msg),
+    });
+    auto s = conn_ctx.owner->Reply(conn_ctx.fd, pattern_reply.String());
     if (s.IsOK()) {
       cnt++;
     }
@@ -509,7 +510,7 @@ void Server::UnblockOnStreams(const std::vector<std::string> &keys, Redis::Conne
     }
 
     for (auto it = iter->second.begin(); it != iter->second.end();) {
-      auto consumer = *it;
+      const auto &consumer = *it;
       if (conn->GetFD() == consumer->fd && conn->Owner() == consumer->owner) {
         iter->second.erase(it);
         if (iter->second.empty()) {
@@ -873,7 +874,7 @@ void Server::GetRoleInfo(std::string *info) {
       roles.emplace_back("connecting");
     }
     roles.emplace_back(std::to_string(storage_->LatestSeq()));
-    *info = Redis::MultiBulkString(roles);
+    Redis::MultiBulkString(roles).Dump(*info);
   } else {
     std::vector<std::string> list;
     slave_threads_mu_.lock();
@@ -886,16 +887,15 @@ void Server::GetRoleInfo(std::string *info) {
       }));
     }
     slave_threads_mu_.unlock();
-    auto multi_len = 2;
+
+    auto array = Redis::Array();
+    array.Push(Redis::BulkString("master"));
+    array.Push(Redis::BulkString(std::to_string(storage_->LatestSeq())));
     if (list.size() > 0) {
-      multi_len = 3;
+      array.Push(Redis::MultiBulkString(list));
     }
-    info->append(Redis::MultiLen(multi_len));
-    info->append(Redis::BulkString("master"));
-    info->append(Redis::BulkString(std::to_string(storage_->LatestSeq())));
-    if (list.size() > 0) {
-      info->append(Redis::Array(list));
-    }
+
+    array.Dump(*info);
   }
 }
 
@@ -1410,11 +1410,7 @@ void Server::ScriptFlush() {
 // channel: we put the same function commands into one channel to handle uniformly
 // tokens: the serialized commands
 Status Server::Propagate(const std::string &channel, const std::vector<std::string> &tokens) {
-  std::string value = Redis::MultiLen(tokens.size());
-  for (const auto &iter : tokens) {
-    value += Redis::BulkString(iter);
-  }
-  return storage_->WriteToPropagateCF(channel, value);
+  return storage_->WriteToPropagateCF(channel, Redis::MultiBulkString(tokens, false).String());
 }
 
 Status Server::ExecPropagateScriptCommand(const std::vector<std::string> &tokens) {

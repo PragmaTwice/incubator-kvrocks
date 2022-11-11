@@ -147,13 +147,13 @@ class CommandAuth : public Commander {
     AuthResult result = AuthenticateUser(conn, config, user_password);
     switch (result) {
       case AuthResult::OK:
-        *output = Redis::SimpleString("OK");
+        Redis::SimpleString("OK").Dump(*output);
         break;
       case AuthResult::INVALID_PASSWORD:
-        *output = Redis::Error("ERR invalid password");
+        Redis::Error("ERR invalid password").Dump(*output);
         break;
       case AuthResult::NO_REQUIRE_PASS:
-        *output = Redis::Error("ERR Client sent AUTH, but no password is set");
+        Redis::Error("ERR Client sent AUTH, but no password is set").Dump(*output);
         break;
     }
     return Status::OK();
@@ -164,7 +164,7 @@ class CommandNamespace : public Commander {
  public:
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
     if (!conn->IsAdmin()) {
-      *output = Redis::Error(errAdministorPermissionRequired);
+      Redis::Error(errAdministorPermissionRequired).Dump(*output);
       return Status::OK();
     }
     Config *config = svr->GetConfig();
@@ -179,32 +179,32 @@ class CommandNamespace : public Commander {
         }
         namespaces.emplace_back(kDefaultNamespace);
         namespaces.emplace_back(config->requirepass);
-        *output = Redis::MultiBulkString(namespaces, false);
+        Redis::MultiBulkString(namespaces, false).Dump(*output);
       } else {
         std::string token;
         auto s = config->GetNamespace(args_[2], &token);
         if (s.Is<Status::NotFound>()) {
-          *output = Redis::NilString();
+          Redis::NullBulkString().Dump(*output);
         } else {
-          *output = Redis::BulkString(token);
+          Redis::BulkString(token).Dump(*output);
         }
       }
     } else if (args_.size() == 4 && sub_command == "set") {
       Status s = config->SetNamespace(args_[2], args_[3]);
-      *output = s.IsOK() ? Redis::SimpleString("OK") : Redis::Error(s.Msg());
+      (s.IsOK() ? Redis::SimpleString("OK") : Redis::Error(s.Msg())).Dump(*output);
       LOG(WARNING) << "Updated namespace: " << args_[2] << " with token: " << args_[3] << ", addr: " << conn->GetAddr()
                    << ", result: " << s.Msg();
     } else if (args_.size() == 4 && sub_command == "add") {
       Status s = config->AddNamespace(args_[2], args_[3]);
-      *output = s.IsOK() ? Redis::SimpleString("OK") : Redis::Error(s.Msg());
+      (s.IsOK() ? Redis::SimpleString("OK") : Redis::Error(s.Msg())).Dump(*output);
       LOG(WARNING) << "New namespace: " << args_[2] << " with token: " << args_[3] << ", addr: " << conn->GetAddr()
                    << ", result: " << s.Msg();
     } else if (args_.size() == 3 && sub_command == "del") {
       Status s = config->DelNamespace(args_[2]);
-      *output = s.IsOK() ? Redis::SimpleString("OK") : Redis::Error(s.Msg());
+      (s.IsOK() ? Redis::SimpleString("OK") : Redis::Error(s.Msg())).Dump(*output);
       LOG(WARNING) << "Deleted namespace: " << args_[2] << ", addr: " << conn->GetAddr() << ", result: " << s.Msg();
     } else {
-      *output = Redis::Error("NAMESPACE subcommand must be one of GET, SET, DEL, ADD");
+      Redis::Error("NAMESPACE subcommand must be one of GET, SET, DEL, ADD").Dump(*output);
     }
     return Status::OK();
   }
@@ -220,12 +220,12 @@ class CommandKeys : public Commander {
       redis.Keys(std::string(), &keys);
     } else {
       if (prefix[prefix.size() - 1] != '*') {
-        *output = Redis::Error("ERR only keys prefix match was supported");
+        *output = Redis::Error("ERR only keys prefix match was supported").String();
         return Status::OK();
       }
       redis.Keys(prefix.substr(0, prefix.size() - 1), &keys);
     }
-    *output = Redis::MultiBulkString(keys);
+    *output = Redis::MultiBulkString(keys).String();
     return Status::OK();
   }
 };
@@ -243,7 +243,7 @@ class CommandFlushDB : public Commander {
     rocksdb::Status s = redis.FlushDB();
     LOG(WARNING) << "DB keys in namespce: " << conn->GetNamespace() << " was flushed, addr: " << conn->GetAddr();
     if (s.ok()) {
-      *output = Redis::SimpleString("OK");
+      *output = Redis::SimpleString("OK").String();
       return Status::OK();
     }
     return Status(Status::RedisExecErr, s.ToString());
@@ -254,7 +254,7 @@ class CommandFlushAll : public Commander {
  public:
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
     if (!conn->IsAdmin()) {
-      *output = Redis::Error(errAdministorPermissionRequired);
+      *output = Redis::Error(errAdministorPermissionRequired).String();
       return Status::OK();
     }
     if (svr->GetConfig()->cluster_enabled) {
@@ -267,7 +267,7 @@ class CommandFlushAll : public Commander {
     rocksdb::Status s = redis.FlushAll();
     LOG(WARNING) << "All DB keys was flushed, addr: " << conn->GetAddr();
     if (s.ok()) {
-      *output = Redis::SimpleString("OK");
+      *output = Redis::SimpleString("OK").String();
       return Status::OK();
     }
     return Status(Status::RedisExecErr, s.ToString());
@@ -278,9 +278,9 @@ class CommandPing : public Commander {
  public:
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
     if (args_.size() == 1) {
-      *output = Redis::SimpleString("PONG");
+      *output = Redis::SimpleString("PONG").String();
     } else if (args_.size() == 2) {
-      *output = Redis::BulkString(args_[1]);
+      *output = Redis::BulkString(args_[1]).String();
     } else {
       return Status(Status::NotOK, errWrongNumOfArguments);
     }
@@ -291,7 +291,7 @@ class CommandPing : public Commander {
 class CommandSelect : public Commander {
  public:
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
-    *output = Redis::SimpleString("OK");
+    *output = Redis::SimpleString("OK").String();
     return Status::OK();
   }
 };
@@ -300,34 +300,34 @@ class CommandConfig : public Commander {
  public:
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
     if (!conn->IsAdmin()) {
-      *output = Redis::Error(errAdministorPermissionRequired);
+      *output = Redis::Error(errAdministorPermissionRequired).String();
       return Status::OK();
     }
     Config *config = svr->GetConfig();
     std::string sub_command = Util::ToLower(args_[1]);
     if ((sub_command == "rewrite" && args_.size() != 2) || (sub_command == "get" && args_.size() != 3) ||
         (sub_command == "set" && args_.size() != 4)) {
-      *output = Redis::Error(errWrongNumOfArguments);
+      *output = Redis::Error(errWrongNumOfArguments).String();
       return Status::OK();
     }
     if (args_.size() == 2 && sub_command == "rewrite") {
       Status s = config->Rewrite();
       if (!s.IsOK()) return Status(Status::RedisExecErr, s.Msg());
-      *output = Redis::SimpleString("OK");
+      *output = Redis::SimpleString("OK").String();
       LOG(INFO) << "# CONFIG REWRITE executed with success";
     } else if (args_.size() == 3 && sub_command == "get") {
       std::vector<std::string> values;
       config->Get(args_[2], &values);
-      *output = Redis::MultiBulkString(values);
+      *output = Redis::MultiBulkString(values).String();
     } else if (args_.size() == 4 && sub_command == "set") {
       Status s = config->Set(svr, args_[2], args_[3]);
       if (!s.IsOK()) {
-        *output = Redis::Error("CONFIG SET '" + args_[2] + "' error: " + s.Msg());
+        *output = Redis::Error("CONFIG SET '" + args_[2] + "' error: " + s.Msg()).String();
       } else {
-        *output = Redis::SimpleString("OK");
+        *output = Redis::SimpleString("OK").String();
       }
     } else {
-      *output = Redis::Error("CONFIG subcommand must be one of GET, SET, REWRITE");
+      *output = Redis::Error("CONFIG subcommand must be one of GET, SET, REWRITE").String();
     }
     return Status::OK();
   }
@@ -351,7 +351,7 @@ class CommandGet : public Commander {
     if (!s.ok() && !s.IsNotFound()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = s.IsNotFound() ? Redis::NilString() : Redis::BulkString(value);
+    *output = (s.IsNotFound() ? Redis::NullBulkString() : Redis::BulkString(value)).String();
     return Status::OK();
   }
 };
@@ -390,7 +390,7 @@ class CommandGetEx : public Commander {
     if (!s.ok() && !s.IsNotFound()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = s.IsNotFound() ? Redis::NilString() : Redis::BulkString(value);
+    *output = (s.IsNotFound() ? Redis::NullBulkString() : Redis::BulkString(value)).String();
     return Status::OK();
   }
 
@@ -409,9 +409,9 @@ class CommandStrlen : public Commander {
       return Status(Status::RedisExecErr, s.ToString());
     }
     if (s.IsNotFound()) {
-      *output = Redis::Integer(0);
+      *output = Redis::Integer(0).String();
     } else {
-      *output = Redis::Integer(value.size());
+      *output = Redis::Integer(value.size()).String();
     }
     return Status::OK();
   }
@@ -427,9 +427,9 @@ class CommandGetSet : public Commander {
       return Status(Status::RedisExecErr, s.ToString());
     }
     if (s.IsNotFound()) {
-      *output = Redis::NilString();
+      *output = Redis::NullBulkString().String();
     } else {
-      *output = Redis::BulkString(old_value);
+      *output = Redis::BulkString(old_value).String();
     }
     return Status::OK();
   }
@@ -445,9 +445,9 @@ class CommandGetDel : public Commander {
       return Status(Status::RedisExecErr, s.ToString());
     }
     if (s.IsNotFound()) {
-      *output = Redis::NilString();
+      *output = Redis::NullBulkString().String();
     } else {
-      *output = Redis::BulkString(value);
+      *output = Redis::BulkString(value).String();
     }
     return Status::OK();
   }
@@ -474,7 +474,7 @@ class CommandGetRange : public Commander {
       return Status(Status::RedisExecErr, s.ToString());
     }
     if (s.IsNotFound()) {
-      *output = Redis::NilString();
+      *output = Redis::NullBulkString().String();
       return Status::OK();
     }
     if (start_ < 0) start_ = static_cast<int>(value.size()) + start_;
@@ -482,9 +482,9 @@ class CommandGetRange : public Commander {
     if (start_ < 0) start_ = 0;
     if (stop_ > static_cast<int>(value.size())) stop_ = static_cast<int>(value.size());
     if (start_ > stop_) {
-      *output = Redis::NilString();
+      *output = Redis::NullBulkString().String();
     } else {
-      *output = Redis::BulkString(value.substr(start_, stop_ - start_ + 1));
+      *output = Redis::BulkString(value.substr(start_, stop_ - start_ + 1)).String();
     }
     return Status::OK();
   }
@@ -511,7 +511,7 @@ class CommandSetRange : public Commander {
     if (!s.ok()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = Redis::Integer(ret);
+    *output = Redis::Integer(ret).String();
     return Status::OK();
   }
 
@@ -530,7 +530,7 @@ class CommandMGet : public Commander {
     std::vector<std::string> values;
     // always return OK
     auto statuses = string_db.MGet(keys, &values);
-    *output = Redis::MultiBulkString(values, statuses);
+    *output = Redis::MultiBulkString(values, statuses).String();
     return Status::OK();
   }
 };
@@ -544,7 +544,7 @@ class CommandAppend : public Commander {
     if (!s.ok()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = Redis::Integer(ret);
+    *output = Redis::Integer(ret).String();
     return Status::OK();
   }
 };
@@ -576,7 +576,7 @@ class CommandSet : public Commander {
 
     if (ttl_ < 0) {
       string_db.Del(args_[1]);
-      *output = Redis::SimpleString("OK");
+      *output = Redis::SimpleString("OK").String();
       return Status::OK();
     }
 
@@ -592,9 +592,9 @@ class CommandSet : public Commander {
       return Status(Status::RedisExecErr, s.ToString());
     }
     if (set_flag_ != NONE && !ret) {
-      *output = Redis::NilString();
+      *output = Redis::NullBulkString().String();
     } else {
-      *output = Redis::SimpleString("OK");
+      *output = Redis::SimpleString("OK").String();
     }
     return Status::OK();
   }
@@ -619,7 +619,7 @@ class CommandSetEX : public Commander {
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
     Redis::String string_db(svr->storage_, conn->GetNamespace());
     rocksdb::Status s = string_db.SetEX(args_[1], args_[3], ttl_);
-    *output = Redis::SimpleString("OK");
+    *output = Redis::SimpleString("OK").String();
     return Status::OK();
   }
 
@@ -646,7 +646,7 @@ class CommandPSetEX : public Commander {
   Status Execute(Server *svr, Connection *conn, std::string *output) override {
     Redis::String string_db(svr->storage_, conn->GetNamespace());
     rocksdb::Status s = string_db.SetEX(args_[1], args_[3], ttl_);
-    *output = Redis::SimpleString("OK");
+    *output = Redis::SimpleString("OK").String();
     return Status::OK();
   }
 
@@ -672,7 +672,7 @@ class CommandMSet : public Commander {
     if (!s.ok()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = Redis::SimpleString("OK");
+    *output = Redis::SimpleString("OK").String();
     return Status::OK();
   }
 };
@@ -686,7 +686,7 @@ class CommandSetNX : public Commander {
     if (!s.ok()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = Redis::Integer(ret);
+    *output = Redis::Integer(ret).String();
     return Status::OK();
   }
 };
@@ -711,7 +711,7 @@ class CommandMSetNX : public Commander {
     if (!s.ok()) {
       return Status(Status::RedisExecErr, s.ToString());
     }
-    *output = Redis::Integer(ret);
+    *output = Redis::Integer(ret).String();
     return Status::OK();
   }
 };
@@ -723,7 +723,7 @@ class CommandIncr : public Commander {
     Redis::String string_db(svr->storage_, conn->GetNamespace());
     rocksdb::Status s = string_db.IncrBy(args_[1], 1, &ret);
     if (!s.ok()) return Status(Status::RedisExecErr, s.ToString());
-    *output = Redis::Integer(ret);
+    *output = Redis::Integer(ret).String();
     return Status::OK();
   }
 };

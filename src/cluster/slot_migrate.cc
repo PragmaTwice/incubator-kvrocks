@@ -405,8 +405,8 @@ Status SlotMigrate::Clean() {
 }
 
 bool SlotMigrate::AuthDstServer(int sock_fd, const std::string &password) {
-  std::string cmd = Redis::MultiBulkString({"auth", password}, false);
-  auto s = Util::SockSend(sock_fd, cmd);
+  auto cmd = Redis::MultiBulkString({"auth", password}, false);
+  auto s = Util::SockSend(sock_fd, cmd.String());
   if (!s.IsOK()) {
     LOG(ERROR) << "[migrate] Failed to send auth command to destination, slot: " << migrate_slot_
                << ", error: " << s.Msg();
@@ -425,8 +425,8 @@ bool SlotMigrate::SetDstImportStatus(int sock_fd, int status) {
   if (sock_fd <= 0) return false;
 
   int slot = migrate_slot_;
-  std::string cmd = Redis::MultiBulkString({"cluster", "import", std::to_string(slot), std::to_string(status)});
-  auto s = Util::SockSend(sock_fd, cmd);
+  auto cmd = Redis::MultiBulkString({"cluster", "import", std::to_string(slot), std::to_string(status)});
+  auto s = Util::SockSend(sock_fd, cmd.String());
   if (!s.IsOK()) {
     LOG(ERROR) << "[migrate] Failed to send import command to destination, slot: " << slot << ", error: " << s.Msg();
     return false;
@@ -602,7 +602,7 @@ bool SlotMigrate::MigrateSimpleKey(const rocksdb::Slice &key, const Metadata &me
     command.emplace_back("EXAT");
     command.emplace_back(std::to_string(metadata.expire));
   }
-  *restore_cmds += Redis::MultiBulkString(command, false);
+  Redis::MultiBulkString(command, false).Dump(*restore_cmds);
   current_pipeline_size_++;
 
   // Check whether pipeline needs to be sent
@@ -681,7 +681,7 @@ bool SlotMigrate::MigrateComplexKey(const rocksdb::Slice &key, const Metadata &m
     if (metadata.Type() != kRedisBitmap) {
       item_count++;
       if (item_count >= kMaxItemsInCommand) {
-        *restore_cmds += Redis::MultiBulkString(user_cmd, false);
+        Redis::MultiBulkString(user_cmd, false).Dump(*restore_cmds);
         current_pipeline_size_++;
         item_count = 0;
         // Have to clear saved items
@@ -698,13 +698,13 @@ bool SlotMigrate::MigrateComplexKey(const rocksdb::Slice &key, const Metadata &m
 
   // Have to check the item count of the last command list
   if (item_count % kMaxItemsInCommand) {
-    *restore_cmds += Redis::MultiBulkString(user_cmd, false);
+    Redis::MultiBulkString(user_cmd, false).Dump(*restore_cmds);
     current_pipeline_size_++;
   }
 
   // Add ttl for complex key
   if (metadata.expire) {
-    *restore_cmds += Redis::MultiBulkString({"EXPIREAT", key.ToString(), std::to_string(metadata.expire)}, false);
+    Redis::MultiBulkString({"EXPIREAT", key.ToString(), std::to_string(metadata.expire)}, false).Dump(*restore_cmds);
     current_pipeline_size_++;
   }
 
@@ -737,7 +737,7 @@ bool SlotMigrate::MigrateBitmapKey(const InternalKey &inkey, std::unique_ptr<roc
           offset = (index * 8) + (byte_idx * 8) + bit_idx;
           user_cmd->emplace_back(std::to_string(offset));
           user_cmd->emplace_back("1");
-          *restore_cmds += Redis::MultiBulkString(*user_cmd, false);
+          Redis::MultiBulkString(*user_cmd, false).Dump(*restore_cmds);
           current_pipeline_size_++;
           user_cmd->erase(user_cmd->begin() + 2, user_cmd->end());
         }

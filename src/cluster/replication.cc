@@ -73,8 +73,7 @@ void FeedSlaveThread::Join() {
 
 void FeedSlaveThread::checkLivenessIfNeed() {
   if (++interval % 1000) return;
-  const auto ping_command = Redis::BulkString("ping");
-  auto s = Util::SockSend(conn_->GetFD(), ping_command);
+  auto s = Util::SockSend(conn_->GetFD(), Redis::BulkString("ping").String());
   if (!s.IsOK()) {
     LOG(ERROR) << "Ping slave[" << conn_->GetAddr() << "] err: " << s.Msg() << ", would stop the thread";
     Stop();
@@ -109,7 +108,7 @@ void FeedSlaveThread::loop() {
       return;
     }
     updates_in_batches += batch.writeBatchPtr->Count();
-    batches_bulk += Redis::BulkString(batch.writeBatchPtr->Data());
+    batches_bulk += Redis::BulkString(batch.writeBatchPtr->Data()).String();
     // 1. We must send the first replication batch, as said above.
     // 2. To avoid frequently calling 'write' system call to send replication stream,
     //    we pack multiple batches into one big bulk if possible, and only send once.
@@ -355,7 +354,7 @@ void ReplicationThread::run() {
 
 ReplicationThread::CBState ReplicationThread::authWriteCB(bufferevent *bev, void *ctx) {
   auto self = static_cast<ReplicationThread *>(ctx);
-  send_string(bev, Redis::MultiBulkString({"AUTH", self->srv_->GetConfig()->masterauth}));
+  send_string(bev, Redis::MultiBulkString({"AUTH", self->srv_->GetConfig()->masterauth}).String());
   LOG(INFO) << "[replication] Auth request was sent, waiting for response";
   self->repl_state_ = kReplSendAuth;
   return CBState::NEXT;
@@ -375,7 +374,7 @@ ReplicationThread::CBState ReplicationThread::authReadCB(bufferevent *bev, void 
 }
 
 ReplicationThread::CBState ReplicationThread::checkDBNameWriteCB(bufferevent *bev, void *ctx) {
-  send_string(bev, Redis::MultiBulkString({"_db_name"}));
+  send_string(bev, Redis::MultiBulkString({"_db_name"}).String());
   auto self = static_cast<ReplicationThread *>(ctx);
   self->repl_state_ = kReplCheckDBName;
   LOG(INFO) << "[replication] Check db name request was sent, waiting for response";
@@ -408,8 +407,9 @@ ReplicationThread::CBState ReplicationThread::checkDBNameReadCB(bufferevent *bev
 
 ReplicationThread::CBState ReplicationThread::replConfWriteCB(bufferevent *bev, void *ctx) {
   auto self = static_cast<ReplicationThread *>(ctx);
-  send_string(bev,
-              Redis::MultiBulkString({"replconf", "listening-port", std::to_string(self->srv_->GetConfig()->port)}));
+  send_string(
+      bev,
+      Redis::MultiBulkString({"replconf", "listening-port", std::to_string(self->srv_->GetConfig()->port)}).String());
   self->repl_state_ = kReplReplConf;
   LOG(INFO) << "[replication] replconf request was sent, waiting for response";
   return CBState::NEXT;
@@ -459,11 +459,11 @@ ReplicationThread::CBState ReplicationThread::tryPSyncWriteCB(bufferevent *bev, 
   // Also use old PSYNC if replica can't find replication id from WAL and DB.
   if (!self->srv_->GetConfig()->use_rsid_psync || self->next_try_old_psync_ || replid.length() != kReplIdLength) {
     self->next_try_old_psync_ = false;  // Reset next_try_old_psync_
-    send_string(bev, Redis::MultiBulkString({"PSYNC", std::to_string(next_seq)}));
+    send_string(bev, Redis::MultiBulkString({"PSYNC", std::to_string(next_seq)}).String());
     LOG(INFO) << "[replication] Try to use psync, next seq: " << next_seq;
   } else {
     // NEW PSYNC "Unique Replication Sequence ID": replication id and sequence id
-    send_string(bev, Redis::MultiBulkString({"PSYNC", replid, std::to_string(next_seq)}));
+    send_string(bev, Redis::MultiBulkString({"PSYNC", replid, std::to_string(next_seq)}).String());
     LOG(INFO) << "[replication] Try to use new psync, current unique replication sequence id: " << replid << ":"
               << cur_seq;
   }
@@ -549,7 +549,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
 }
 
 ReplicationThread::CBState ReplicationThread::fullSyncWriteCB(bufferevent *bev, void *ctx) {
-  send_string(bev, Redis::MultiBulkString({"_fetch_meta"}));
+  send_string(bev, Redis::MultiBulkString({"_fetch_meta"}).String());
   auto self = static_cast<ReplicationThread *>(ctx);
   self->repl_state_ = kReplFetchMeta;
   LOG(INFO) << "[replication] Start syncing data with fullsync";
@@ -771,7 +771,7 @@ Status ReplicationThread::sendAuth(int sock_fd) {
   if (!auth.empty()) {
     UniqueEvbuf evbuf;
     const auto auth_command = Redis::MultiBulkString({"AUTH", auth});
-    auto s = Util::SockSend(sock_fd, auth_command);
+    auto s = Util::SockSend(sock_fd, auth_command.String());
     if (!s.IsOK()) return Status(Status::NotOK, "send auth command err:" + s.Msg());
     while (true) {
       if (evbuffer_read(evbuf.get(), sock_fd, -1) <= 0) {
@@ -859,7 +859,7 @@ Status ReplicationThread::fetchFiles(int sock_fd, const std::string &dir, const 
   files_str.pop_back();
 
   const auto fetch_command = Redis::MultiBulkString({"_fetch_file", files_str});
-  auto s = Util::SockSend(sock_fd, fetch_command);
+  auto s = Util::SockSend(sock_fd, fetch_command.String());
   if (!s.IsOK()) return Status(Status::NotOK, "send fetch file command: " + s.Msg());
 
   UniqueEvbuf evbuf;
