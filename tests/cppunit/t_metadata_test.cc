@@ -46,10 +46,10 @@ TEST(InternalKey, EncodeAndDecode) {
 
 TEST(Metadata, EncodeAndDeocde) {
   std::string string_bytes;
-  Metadata string_md(kRedisString);
+  StringMetadata string_md;
   string_md.expire = 123;
   string_md.Encode(&string_bytes);
-  Metadata string_md1(kRedisNone);
+  UntypedMetadata string_md1;
   string_md1.Decode(string_bytes);
   ASSERT_EQ(string_md, string_md1);
   ListMetadata list_md;

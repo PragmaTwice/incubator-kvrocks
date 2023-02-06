@@ -33,7 +33,7 @@ using rocksdb::Slice;
 bool MetadataFilter::Filter(int level, const Slice &key, const Slice &value, std::string *new_value,
                             bool *modified) const {
   std::string ns, user_key, bytes = value.ToString();
-  Metadata metadata(kRedisNone, false);
+  UntypedMetadata metadata(false);
   rocksdb::Status s = metadata.Decode(bytes);
   ExtractNamespaceKey(key, &ns, &user_key, stor_->IsSlotIdEncoded());
   if (!s.ok()) {
@@ -96,7 +96,7 @@ bool SubKeyFilter::IsMetadataExpired(const InternalKey &ikey, const Metadata &me
 rocksdb::CompactionFilter::Decision SubKeyFilter::FilterBlobByKey(int level, const Slice &key, std::string *new_value,
                                                                   std::string *skip_until) const {
   InternalKey ikey(key, stor_->IsSlotIdEncoded());
-  Metadata metadata(kRedisNone, false);
+  UntypedMetadata metadata(false);
   Status s = GetMetadata(ikey, &metadata);
   if (s.Is<Status::NotFound>()) {
     return rocksdb::CompactionFilter::Decision::kRemove;
@@ -119,7 +119,7 @@ rocksdb::CompactionFilter::Decision SubKeyFilter::FilterBlobByKey(int level, con
 bool SubKeyFilter::Filter(int level, const Slice &key, const Slice &value, std::string *new_value,
                           bool *modified) const {
   InternalKey ikey(key, stor_->IsSlotIdEncoded());
-  Metadata metadata(kRedisNone, false);
+  UntypedMetadata metadata(false);
   Status s = GetMetadata(ikey, &metadata);
   if (s.Is<Status::NotFound>()) {
     return true;

@@ -23,8 +23,8 @@
 #include <rocksdb/status.h>
 
 #include <atomic>
+#include <functional>
 #include <string>
-#include <vector>
 
 #include "encoding.h"
 #include "types/redis_stream_base.h"
@@ -56,8 +56,7 @@ enum RedisCommand {
   kRedisCmdLMove,
 };
 
-const std::vector<std::string> RedisTypeNames = {"none", "string", "hash",      "list",  "set",
-                                                 "zset", "bitmap", "sortedint", "stream"};
+const std::string RedisTypeNames[] = {"none", "string", "hash", "list", "set", "zset", "bitmap", "sortedint", "stream"};
 
 extern const char *kErrMsgWrongType;
 extern const char *kErrMsgKeyExpired;
@@ -104,60 +103,73 @@ class Metadata {
   uint64_t version;
   uint32_t size;
 
- public:
+ protected:
   explicit Metadata(RedisType type, bool generate_version = true);
+
+ public:
   static void InitVersionCounter();
 
   RedisType Type() const;
-  virtual int32_t TTL() const;
-  virtual timeval Time() const;
-  virtual bool Expired() const;
-  virtual void Encode(std::string *dst);
+  int32_t TTL() const;
+  timeval Time() const;
+  bool Expired() const;
+  virtual void Encode(std::string *dst) const;
   virtual rocksdb::Status Decode(const std::string &bytes);
-  bool operator==(const Metadata &that) const;
+  virtual bool operator==(const Metadata &that) const;
 
  private:
   uint64_t generateVersion();
 };
 
-class HashMetadata : public Metadata {
- public:
+struct UntypedMetadata : public Metadata {
+  explicit UntypedMetadata(bool generate_version = true) : Metadata(kRedisNone, generate_version) {}
+
+private:
+  // UntypedMetadata cannot be encoded to buffer
+  void Encode(std::string *dst) const override {};
+
+public:
+  rocksdb::Status Decode(const std::string &bytes) override;
+};
+
+struct StringMetadata : public Metadata {
+  explicit StringMetadata(bool generate_version = true) : Metadata(kRedisString, generate_version) {}
+
+  void Encode(std::string *dst) const override;
+  rocksdb::Status Decode(const std::string &bytes) override;
+  bool operator==(const Metadata &that) const override;
+};
+
+struct HashMetadata : public Metadata {
   explicit HashMetadata(bool generate_version = true) : Metadata(kRedisHash, generate_version) {}
 };
 
-class SetMetadata : public Metadata {
- public:
+struct SetMetadata : public Metadata {
   explicit SetMetadata(bool generate_version = true) : Metadata(kRedisSet, generate_version) {}
 };
 
-class ZSetMetadata : public Metadata {
- public:
+struct ZSetMetadata : public Metadata {
   explicit ZSetMetadata(bool generate_version = true) : Metadata(kRedisZSet, generate_version) {}
 };
 
-class BitmapMetadata : public Metadata {
- public:
+struct BitmapMetadata : public Metadata {
   explicit BitmapMetadata(bool generate_version = true) : Metadata(kRedisBitmap, generate_version) {}
 };
 
-class SortedintMetadata : public Metadata {
- public:
+struct SortedintMetadata : public Metadata {
   explicit SortedintMetadata(bool generate_version = true) : Metadata(kRedisSortedint, generate_version) {}
 };
 
-class ListMetadata : public Metadata {
- public:
+struct ListMetadata : public Metadata {
   uint64_t head;
   uint64_t tail;
   explicit ListMetadata(bool generate_version = true);
 
- public:
-  void Encode(std::string *dst) override;
+  void Encode(std::string *dst) const override;
   rocksdb::Status Decode(const std::string &bytes) override;
 };
 
-class StreamMetadata : public Metadata {
- public:
+struct StreamMetadata : public Metadata {
   Redis::StreamEntryID last_generated_id;
   Redis::StreamEntryID recorded_first_entry_id;
   Redis::StreamEntryID max_deleted_entry_id;
@@ -167,7 +179,22 @@ class StreamMetadata : public Metadata {
 
   explicit StreamMetadata(bool generate_version = true) : Metadata(kRedisStream, generate_version) {}
 
- public:
-  void Encode(std::string *dst) override;
+  void Encode(std::string *dst) const override;
   rocksdb::Status Decode(const std::string &bytes) override;
 };
+
+inline const std::function<std::unique_ptr<Metadata>(bool)> RedisMetadataFactory[] = {
+    [](bool v) { return std::make_unique<UntypedMetadata>(v); },
+    [](bool v) { return std::make_unique<StringMetadata>(v); },
+    [](bool v) { return std::make_unique<HashMetadata>(v); },
+    [](bool v) { return std::make_unique<ListMetadata>(v); },
+    [](bool v) { return std::make_unique<SetMetadata>(v); },
+    [](bool v) { return std::make_unique<ZSetMetadata>(v); },
+    [](bool v) { return std::make_unique<BitmapMetadata>(v); },
+    [](bool v) { return std::make_unique<SortedintMetadata>(v); },
+    [](bool v) { return std::make_unique<StreamMetadata>(v); },
+};
+
+inline auto CreateMetadata(RedisType type, bool generate_version = true) {
+  return RedisMetadataFactory[type](generate_version);
+}

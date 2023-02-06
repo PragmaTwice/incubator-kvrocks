@@ -566,7 +566,7 @@ StatusOr<KeyMigrationResult> SlotMigrate::MigrateOneKey(const rocksdb::Slice &ke
                                                         const rocksdb::Slice &encoded_metadata,
                                                         std::string *restore_cmds) {
   std::string bytes = encoded_metadata.ToString();
-  Metadata metadata(kRedisNone, false);
+  UntypedMetadata metadata(false);
   metadata.Decode(bytes);
 
   if (metadata.Type() != kRedisString && metadata.Type() != kRedisStream && metadata.size == 0) {
