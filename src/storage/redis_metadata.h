@@ -124,11 +124,11 @@ class Metadata {
 struct UntypedMetadata : public Metadata {
   explicit UntypedMetadata(bool generate_version = true) : Metadata(kRedisNone, generate_version) {}
 
-private:
+ private:
   // UntypedMetadata cannot be encoded to buffer
-  void Encode(std::string *dst) const override {};
+  void Encode(std::string *dst) const override{};
 
-public:
+ public:
   rocksdb::Status Decode(const std::string &bytes) override;
 };
 
