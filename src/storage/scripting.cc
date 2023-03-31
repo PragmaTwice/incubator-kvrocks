@@ -34,8 +34,11 @@
 #include "parse_util.h"
 #include "rand.h"
 #include "server/redis_connection.h"
+#include "server/redis_reply.h"
 #include "server/server.h"
 #include "sha1.h"
+#include "storage/storage.h"
+#include "string_util.h"
 
 /* The maximum number of characters needed to represent a long double
  * as a string (long double has a huge range).
@@ -115,6 +118,11 @@ void loadFuncs(lua_State *lua, bool read_only) {
   /* redis.read_only */
   lua_pushstring(lua, "read_only");
   lua_pushboolean(lua, read_only);
+  lua_settable(lua, -3);
+
+  /* redis.register_function */
+  lua_pushstring(lua, "register_function");
+  lua_pushcfunction(lua, redisRegisterFunction);
   lua_settable(lua, -3);
 
   lua_setglobal(lua, "redis");
@@ -203,6 +211,236 @@ int redisLogCommand(lua_State *lua) {
   return 0;
 }
 
+int redisRegisterFunction(lua_State *lua) {
+  int argc = lua_gettop(lua);
+
+  if (argc != 2) {
+    lua_pushstring(lua, "redis.register_function() requires two arguments.");
+    return lua_error(lua);
+  }
+
+  lua_getglobal(lua, REDIS_FUNCTION_LIBNAME);
+  if (lua_isnil(lua, -1)) {
+    lua_pushstring(lua, "redis.register_function() need to be called from FUNCTION LOAD.");
+    return lua_error(lua);
+  }
+
+  std::string libname = lua_tostring(lua, -1);
+  lua_pop(lua, 1);
+
+  // set this function to global
+  std::string name = lua_tostring(lua, 1);
+  lua_setglobal(lua, (REDIS_LUA_REGISTER_FUNC_PREFIX + name).c_str());
+
+  // set this function name to REDIS_FUNCTION_LIBRARIES[libname]
+  lua_getglobal(lua, REDIS_FUNCTION_LIBRARIES);
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 1);
+    lua_newtable(lua);
+  }
+  lua_getfield(lua, -1, libname.c_str());
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 1);
+    lua_newtable(lua);
+  }
+  size_t len = lua_objlen(lua, -1);
+  lua_pushstring(lua, name.c_str());
+  lua_rawseti(lua, -2, static_cast<int>(len) + 1);
+  lua_setfield(lua, -2, libname.c_str());
+  lua_setglobal(lua, REDIS_FUNCTION_LIBRARIES);
+
+  // store the map from function name to library name
+  auto s = GetServer()->ScriptSetLibOfFunction(name, libname);
+  if (!s) {
+    lua_pushstring(lua, "redis.register_function() failed to store informantion.");
+    return lua_error(lua);
+  }
+
+  return 0;
+}
+
+Status functionLoad(Server *srv, const std::string &script, bool need_to_store, bool replace, std::string *lib_name) {
+  std::string first_line, lua_code;
+  if (auto pos = script.find('\n'); pos != std::string::npos) {
+    first_line = script.substr(0, pos);
+    lua_code = script.substr(pos + 1);
+  } else {
+    return {Status::NotOK, "Expect a Shebang statement in the first line"};
+  }
+
+  static constexpr const char *shebang_libname_prefix = "name=";
+  auto first_line_splitted = Util::Split(first_line, " \r\t");
+  if (first_line_splitted.size() != 2 || first_line_splitted[0] != "#!lua" ||
+      !Util::HasPrefix(first_line_splitted[1], shebang_libname_prefix)) {
+    return {Status::NotOK, "Expect a Shebang statement in the first line"};
+  }
+
+  auto libname = first_line_splitted[1].substr(strlen(shebang_libname_prefix));
+  *lib_name = libname;
+  if (libname.empty()) {
+    return {Status::NotOK, "Expect a valid library name in Shebang statement"};
+  }
+
+  auto lua = srv->Lua();
+
+  if (functionIsLibExist(lua, libname)) {
+    if (!replace) {
+      return {Status::NotOK, "library already exists, please specify REPLACE to force load"};
+    }
+
+    functionClearLib(lua, libname);
+  }
+
+  lua_pushstring(lua, libname.c_str());
+  lua_setglobal(lua, REDIS_FUNCTION_LIBNAME);
+
+  if (luaL_loadbuffer(lua, lua_code.data(), lua_code.size(), "@user_script")) {
+    std::string errMsg = lua_tostring(lua, -1);
+    lua_pop(lua, 1);
+    return {Status::NotOK, "Error while compiling new function lib: " + errMsg};
+  }
+
+  if (lua_pcall(lua, 0, 0, 0)) {
+    std::string errMsg = lua_tostring(lua, -1);
+    lua_pop(lua, 1);
+    return {Status::NotOK, "Error while running new function lib: " + errMsg};
+  }
+
+  if (!functionIsLibExist(lua, libname)) {
+    return {Status::NotOK, "Please register some function in FUNCTION LOAD"};
+  }
+
+  return need_to_store ? srv->ScriptSetLibCode(libname, script) : Status::OK();
+}
+
+bool functionIsLibExist(lua_State *lua, const std::string &libname) {
+  lua_getglobal(lua, REDIS_FUNCTION_LIBRARIES);
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 1);
+    return false;
+  } else {
+    lua_getfield(lua, -1, libname.c_str());
+    if (lua_objlen(lua, -1) == 0) {
+      lua_pop(lua, 2);
+      return false;
+    } else {
+      lua_pop(lua, 2);
+      return true;
+    }
+  }
+}
+
+void functionClearLib(lua_State *lua, const std::string &libname) {
+  lua_getglobal(lua, REDIS_FUNCTION_LIBRARIES);
+  if (!lua_isnil(lua, -1)) {
+    lua_pushnil(lua);
+    lua_setfield(lua, -2, libname.c_str());
+  }
+  lua_pop(lua, 1);
+}
+
+Status functionCall(Server *srv, const std::string &name, const std::vector<std::string> &keys,
+                    const std::vector<std::string> &argv, std::string *output) {
+  auto lua = srv->Lua();
+
+  lua_getglobal(lua, "__redis__err__handler");
+
+  lua_getglobal(lua, (REDIS_LUA_REGISTER_FUNC_PREFIX + name).c_str());
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 1);
+
+    std::string libname;
+    auto s = srv->ScriptGetLibOfFunction(name, &libname);
+    if (!s) return s;
+
+    std::string libcode;
+    s = srv->ScriptGetLibCode(libname, &libcode);
+    if (!s) return s;
+
+    s = functionLoad(srv, libcode, false, false, &libname);
+    if (!s) return s;
+
+    lua_getglobal(lua, (REDIS_LUA_REGISTER_FUNC_PREFIX + name).c_str());
+  }
+
+  pushArray(lua, keys);
+  pushArray(lua, argv);
+  if (lua_pcall(lua, 2, 1, -4)) {
+    std::string errMsg = lua_tostring(lua, -1);
+    lua_pop(lua, 2);
+    return {Status::NotOK, fmt::format("Error while running function `{}`: {}", name, errMsg)};
+  } else {
+    *output = replyToRedisReply(lua);
+    lua_pop(lua, 2);
+  }
+
+  return Status::OK();
+}
+
+Status functionList(Server *srv, const std::string &libname, std::string *output) {
+  auto lua = srv->Lua();
+
+  lua_getglobal(lua, REDIS_FUNCTION_LIBRARIES);
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 1);
+    lua_newtable(lua);
+  }
+
+  if (libname.empty()) {
+    std::vector<std::string> res;
+    lua_pushnil(lua);
+    while (lua_next(lua, -2) != 0) {
+      res.emplace_back(Redis::SimpleString(lua_tostring(lua, -2)));
+      res.emplace_back(replyToRedisReply(lua));
+      lua_pop(lua, 1);
+    }
+    *output = Redis::Array(res);
+    lua_pop(lua, 2);
+    return Status::OK();
+  }
+
+  lua_getfield(lua, -1, libname.c_str());
+  *output = replyToRedisReply(lua);
+  lua_pop(lua, 2);
+  return Status::OK();
+}
+
+Status functionDelete(Server *srv, const std::string &name) {
+  auto lua = srv->Lua();
+
+  lua_getglobal(lua, REDIS_FUNCTION_LIBRARIES);
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 1);
+    return Status::OK();
+  }
+
+  lua_getfield(lua, -1, name.c_str());
+  if (lua_isnil(lua, -1)) {
+    lua_pop(lua, 2);
+    return Status::OK();
+  }
+
+  auto storage = srv->storage_;
+  auto cf = storage->GetCFHandle(Engine::kPropagateColumnFamilyName);
+
+  for (size_t i = 1; i <= lua_objlen(lua, -1); ++i) {
+    lua_rawgeti(lua, -1, static_cast<int>(i));
+    std::string func = lua_tostring(lua, -1);
+    lua_pushnil(lua);
+    lua_setglobal(lua, (REDIS_LUA_REGISTER_FUNC_PREFIX + func).c_str());
+    storage->Delete(rocksdb::WriteOptions(), cf, Engine::kLuaFuncLibPrefix + func);
+    lua_pop(lua, 1);
+  }
+
+  lua_pop(lua, 1);
+  lua_pushnil(lua);
+  lua_setfield(lua, -2, name.c_str());
+  lua_pop(lua, 1);
+  storage->Delete(rocksdb::WriteOptions(), cf, Engine::kLuaLibCodePrefix + name);
+
+  return Status::OK();
+}
+
 Status evalGenericCommand(Redis::Connection *conn, const std::string &body_or_sha, const std::vector<std::string> &keys,
                           const std::vector<std::string> &argv, bool evalsha, std::string *output, bool read_only) {
   Server *srv = conn->GetServer();
@@ -261,7 +499,7 @@ Status evalGenericCommand(Redis::Connection *conn, const std::string &body_or_sh
     lua_pop(lua, 2);
   } else {
     *output = replyToRedisReply(lua);
-    lua_pop(lua, 1);
+    lua_pop(lua, 2);
   }
 
   // clean global variables to prevent information leak in function commands
@@ -315,7 +553,7 @@ int redisGenericCommand(lua_State *lua, int raise_error) {
       size_t obj_len = 0;
       const char *obj_s = lua_tolstring(lua, j, &obj_len);
       if (obj_s == nullptr) {
-        pushError(lua, "Lua redis() command arguments must be strings or integers");
+        pushError(lua, "Lua redis.call() command arguments must be strings or integers");
         return raise_error ? raiseError(lua) : 1;
       }
       args.emplace_back(obj_s, obj_len);
@@ -717,7 +955,7 @@ std::string replyToRedisReply(lua_State *lua) {
       t = lua_type(lua, -1);
       if (t == LUA_TSTRING) {
         output = Redis::Error(lua_tostring(lua, -1));
-        lua_pop(lua, 2);
+        lua_pop(lua, 1);
         return output;
       }
       lua_pop(lua, 1); /* Discard field name pushed before. */
@@ -743,6 +981,7 @@ std::string replyToRedisReply(lua_State *lua) {
           }
           mbulklen++;
           output += replyToRedisReply(lua);
+          lua_pop(lua, 1);
         }
         output = Redis::MultiLen(mbulklen) + output;
       }
@@ -750,7 +989,6 @@ std::string replyToRedisReply(lua_State *lua) {
     default:
       output = Redis::NilString();
   }
-  lua_pop(lua, 1);
   return output;
 }
 
@@ -797,12 +1035,16 @@ void sortArray(lua_State *lua) {
 }
 
 void setGlobalArray(lua_State *lua, const std::string &var, const std::vector<std::string> &elems) {
+  pushArray(lua, elems);
+  lua_setglobal(lua, var.c_str());
+}
+
+void pushArray(lua_State *lua, const std::vector<std::string> &elems) {
   lua_newtable(lua);
   for (size_t i = 0; i < elems.size(); i++) {
     lua_pushlstring(lua, elems[i].c_str(), elems[i].size());
     lua_rawseti(lua, -2, static_cast<int>(i) + 1);
   }
-  lua_setglobal(lua, var.c_str());
 }
 
 /* ---------------------------------------------------------------------------

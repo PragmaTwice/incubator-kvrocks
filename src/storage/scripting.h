@@ -27,7 +27,11 @@
 #include "server/redis_connection.h"
 #include "status.h"
 
-#define REDIS_LUA_FUNC_SHA_PREFIX "f_"  // NOLINT
+#define REDIS_LUA_FUNC_SHA_PREFIX "f_"                       // NOLINT
+#define REDIS_LUA_REGISTER_FUNC_PREFIX "redis_registered__"  // NOLINT
+
+constexpr const char *REDIS_FUNCTION_LIBNAME = "REDIS_FUNCTION_LIBNAME";
+constexpr const char *REDIS_FUNCTION_LIBRARIES = "REDIS_FUNCTION_LIBRARIES";
 
 namespace Lua {
 
@@ -46,6 +50,15 @@ int redisSha1hexCommand(lua_State *lua);
 int redisStatusReplyCommand(lua_State *lua);
 int redisErrorReplyCommand(lua_State *lua);
 int redisLogCommand(lua_State *lua);
+int redisRegisterFunction(lua_State *lua);
+
+Status functionLoad(Server *srv, const std::string &script, bool need_to_store, bool replace, std::string *lib_name);
+Status functionCall(Server *srv, const std::string &name, const std::vector<std::string> &keys,
+                    const std::vector<std::string> &argv, std::string *output);
+Status functionList(Server *srv, const std::string &libname, std::string *output);
+Status functionDelete(Server *srv, const std::string &name);
+bool functionIsLibExist(lua_State *lua, const std::string &libname);
+void functionClearLib(lua_State *lua, const std::string &libname);
 
 Status createFunction(Server *srv, const std::string &body, std::string *sha, lua_State *lua, bool need_to_store);
 
@@ -69,6 +82,7 @@ void pushError(lua_State *lua, const char *err);
 [[noreturn]] int raiseError(lua_State *lua);
 
 void sortArray(lua_State *lua);
+void pushArray(lua_State *lua, const std::vector<std::string> &elems);
 void setGlobalArray(lua_State *lua, const std::string &var, const std::vector<std::string> &elems);
 
 void SHA1Hex(char *digest, const char *script, size_t len);

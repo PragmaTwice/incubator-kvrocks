@@ -199,6 +199,10 @@ class Server {
   Status ScriptExists(const std::string &sha);
   Status ScriptGet(const std::string &sha, std::string *body) const;
   Status ScriptSet(const std::string &sha, const std::string &body) const;
+  Status ScriptGetLibOfFunction(const std::string &func, std::string *lib) const;
+  Status ScriptSetLibOfFunction(const std::string &func, const std::string &lib) const;
+  Status ScriptGetLibCode(const std::string &lib, std::string *code) const;
+  Status ScriptSetLibCode(const std::string &lib, const std::string &code) const;
   void ScriptReset();
   void ScriptFlush();
 

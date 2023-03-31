@@ -44,6 +44,7 @@
 #include "storage/compaction_checker.h"
 #include "storage/redis_db.h"
 #include "storage/scripting.h"
+#include "storage/storage.h"
 #include "string_util.h"
 #include "thread_util.h"
 #include "time_util.h"
@@ -1504,19 +1505,44 @@ Status Server::ScriptExists(const std::string &sha) {
   return ScriptGet(sha, &body);
 }
 
-Status Server::ScriptGet(const std::string &sha, std::string *body) const {
-  std::string func_name = Engine::kLuaFunctionPrefix + sha;
-  auto cf = storage_->GetCFHandle(Engine::kPropagateColumnFamilyName);
-  auto s = storage_->Get(rocksdb::ReadOptions(), cf, func_name, body);
+Status PropagateCFGet(Engine::Storage *storage, const char *prefix, const std::string &user_key, std::string *value) {
+  std::string key = prefix + user_key;
+  auto cf = storage->GetCFHandle(Engine::kPropagateColumnFamilyName);
+  auto s = storage->Get(rocksdb::ReadOptions(), cf, key, value);
   if (!s.ok()) {
     return {s.IsNotFound() ? Status::NotFound : Status::NotOK, s.ToString()};
   }
   return Status::OK();
 }
 
+Status PropagateCFSet(Engine::Storage *storage, const char *prefix, const std::string &user_key,
+                      const std::string &value) {
+  std::string key = prefix + user_key;
+  return storage->WriteToPropagateCF(key, value);
+}
+
+Status Server::ScriptGet(const std::string &sha, std::string *body) const {
+  return PropagateCFGet(storage_, Engine::kLuaFuncSHAPrefix, sha, body);
+}
+
 Status Server::ScriptSet(const std::string &sha, const std::string &body) const {
-  std::string func_name = Engine::kLuaFunctionPrefix + sha;
-  return storage_->WriteToPropagateCF(func_name, body);
+  return PropagateCFSet(storage_, Engine::kLuaFuncSHAPrefix, sha, body);
+}
+
+Status Server::ScriptGetLibOfFunction(const std::string &func, std::string *lib) const {
+  return PropagateCFGet(storage_, Engine::kLuaFuncLibPrefix, func, lib);
+}
+
+Status Server::ScriptSetLibOfFunction(const std::string &func, const std::string &lib) const {
+  return PropagateCFSet(storage_, Engine::kLuaFuncLibPrefix, func, lib);
+}
+
+Status Server::ScriptGetLibCode(const std::string &lib, std::string *code) const {
+  return PropagateCFGet(storage_, Engine::kLuaLibCodePrefix, lib, code);
+}
+
+Status Server::ScriptSetLibCode(const std::string &lib, const std::string &code) const {
+  return PropagateCFSet(storage_, Engine::kLuaLibCodePrefix, lib, code);
 }
 
 void Server::ScriptReset() {
