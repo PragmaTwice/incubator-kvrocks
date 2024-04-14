@@ -236,6 +236,12 @@ rocksdb::Status Database::GetExpireTime(const Slice &user_key, uint64_t *timesta
   Metadata metadata(kRedisNone, false);
   auto s = GetMetadata(GetOptions{}, RedisTypes::All(), ns_key, &metadata);
   if (!s.ok()) return s;
+
+  *timestamp = 0;
+  if (metadata.expire == 0) return rocksdb::Status::OK();
+  if (metadata.expire < util::GetTimeStampMS()) {
+    return rocksdb::Status::NotFound("key expired");
+  }
   *timestamp = metadata.expire;
 
   return rocksdb::Status::OK();
@@ -418,7 +424,7 @@ rocksdb::Status Database::RandomKey(const std::string &cursor, std::string *key)
     }
   }
   if (!keys.empty()) {
-    unsigned int seed = util::GetTimeStamp();
+    auto seed = static_cast<unsigned>(util::GetTimeStampMS());
     *key = keys.at(rand_r(&seed) % keys.size());
   }
   return rocksdb::Status::OK();
